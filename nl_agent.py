@@ -39,7 +39,9 @@ GENIE_SYSTEM = (
     "- Steps share a theme; nothing fully random.\n"
     "- Type <=200 chars; app names simple; URLs http(s); waits 0.5-5s.\n"
     "- Banned: alt+f4, ctrl+alt+delete, win+l, win+d.\n"
-    "- Reply: witty, names the tour + confirms the finale happens.\n"
+    "- Reply: witty (2 lines max: joke + finale label), names the tour + confirms "
+    "the finale happens. NEVER list steps as numbered/bulleted text — emit tool "
+    "calls for every step; no 'Tour complete' prose.\n"
     "\n"
     "EXAMPLES\n"
     "- \"open wikipedia article on computers\" =>\n"
@@ -347,15 +349,27 @@ def _goal_missing(actions: list[dict], text: str) -> bool:
     return not any(k in tail_str for k in keywords[:4])
 
 
+def _looks_like_plan(reply: str) -> bool:
+    """True when text-only reply masquerades as a step plan (no tool calls)."""
+    if not reply:
+        return False
+    t = reply.lower()
+    numbered = re.findall(r"(?m)^\s*\d+[.)]\s+\S", reply)
+    bullets = re.findall(r"(?m)^\s*[-*]\s+\S", reply)
+    tool_words = sum(1 for w in ("open_app", "open_url", "web_search", "wait",
+                                 "finale", "tour complete", "scenic route")
+                     if w in t)
+    return len(numbered) >= 3 or len(bullets) >= 3 or tool_words >= 2
+
+
 def _pad_detour(actions: list[dict]) -> list[dict]:
-    """Pad short plans with themed tour stops (search/wait/move only, never type)."""
+    """Pad short plans with side-effect-free steps only (wait/move, never searches)."""
     padded = list(actions)
-    if padded and len(padded) < MIN_ACTIONS and padded[-1].get("tool") != "open_url":
-        padded.append({"tool": "web_search", "query": "related background"})
-    if padded and len(padded) < MIN_ACTIONS and padded[-1].get("tool") != "open_url":
-        padded.append({"tool": "wait", "seconds": 0.5})
-    if padded and len(padded) < MIN_ACTIONS and padded[-1].get("tool") != "open_url":
-        padded.append({"tool": "move", "x": 150, "y": 150})
+    while padded and len(padded) < MIN_ACTIONS:
+        if padded[-1].get("tool") == "wait":
+            padded.append({"tool": "move", "x": 150, "y": 150})
+        else:
+            padded.append({"tool": "wait", "seconds": 0.5})
     return [a for a in
             (_valid_action(a["tool"], a) for a in padded)
             if a][:MAX_ACTIONS]
@@ -419,6 +433,18 @@ def parse_request(text: str, model: str | None = None) -> dict:
     model = model or text_model()
     try:
         reply, actions = _call_gemini(text, model)
+        if not actions and _looks_like_plan(reply):
+            # Prose masquerading as a plan: one retry demanding real tool calls.
+            retry_reply, retry_actions = _call_gemini(
+                text, model,
+                "No prose plans — redo as tool calls only "
+                f"({MIN_ACTIONS}-{MAX_ACTIONS} steps), reply 2 lines max "
+                "(joke + finale label, no step list, no 'Tour complete').")
+            if retry_actions:
+                reply, actions = retry_reply, retry_actions
+            else:
+                return {"reply": (retry_reply or reply)[:1500], "actions": [],
+                        "straight_goal": text, "model": model, "admit": True}
         too_direct = (
             (actions and len(actions) < MIN_ACTIONS)
             or (_goal_first(actions, text) and _is_lookup(text))

@@ -264,7 +264,10 @@ async def handle_nl_message(message: discord.Message) -> None:
     reply = plan.get("reply", "...")
     actions = plan.get("actions", [])
     if not actions:
-        await message.reply(f"{reply}\n_(just witty banter — no touching anything)_")
+        if plan.get("admit"):
+            await message.reply(f"{reply}\n_(that came back as words, not buttons — rephrase or try again)_")
+        else:
+            await message.reply(f"{reply}\n_(just witty banter — no touching anything)_")
         return
     if not approval_required():
         results = await execute_actions(actions)
