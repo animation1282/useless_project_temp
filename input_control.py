@@ -2,9 +2,12 @@
 
 Usage:
     from input_control import do_press, do_type, do_move, do_click, take_screenshot
+    from input_control import do_open_app, do_open_url, do_web_search, do_wait
 
     do_press("win")
-    do_press("ctrl+c")
+    do_open_app("chrome")
+    do_open_url("https://example.com")
+    do_web_search("lofi hip hop")
     do_type("hello world")
     take_screenshot()  # saves to shots/
     do_move(500, 300)
@@ -14,6 +17,10 @@ Usage:
 CLI:
     python input_control.py --press "ctrl+c"
     python input_control.py --type "hello world"
+    python input_control.py --open-app chrome
+    python input_control.py --open-url https://example.com
+    python input_control.py --search "lofi hip hop"
+    python input_control.py --wait 1.5
     python input_control.py --move 500 300
     python input_control.py --click left
     python input_control.py --shot
@@ -28,9 +35,15 @@ import re
 import sys
 import time
 import traceback
+import webbrowser
+from urllib.parse import quote_plus
 
 MAX_TYPE_LEN = 200
 TYPE_INTERVAL = 0.02
+MAX_APP_LEN = 50
+MAX_URL_LEN = 500
+MAX_SEARCH_LEN = 200
+MAX_WAIT = 5.0
 SHOTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
 
 SYNONYMS = {
@@ -259,6 +272,106 @@ def do_click(button: str = "left", clicks: int = 1) -> str:
     return "ok"
 
 
+def sanitize_app(name: str) -> str | None:
+    """Allowlist for app names launched via OS search (no shell)."""
+    name = (name or "").strip()
+    if not name or len(name) > MAX_APP_LEN:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._\-]*", name):
+        return None
+    return name
+
+
+def sanitize_url(url: str) -> str | None:
+    url = (url or "").strip()
+    if not url or len(url) > MAX_URL_LEN:
+        return None
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        return None
+    if re.match(r"^(javascript|file|data):", url, re.IGNORECASE):
+        return None
+    return url
+
+
+def do_open_app(app: str) -> str:
+    """Open app via Win/Super search (keyboard only, no shell). Returns ok|invalid|error."""
+    clean = sanitize_app(app)
+    if not clean:
+        return "invalid"
+    print(f"[OPEN_APP] {clean!r} on {sys.platform}")
+    if is_dry_run():
+        print(f"[DRY_RUN] would open app: {clean!r}")
+        return "ok"
+    try:
+        r = do_press("win")
+        if r != "ok":
+            return f"error:search key failed ({r})"
+        time.sleep(0.5)
+        r = do_type(clean)
+        if r != "ok":
+            return f"error:type app failed ({r})"
+        time.sleep(0.5)
+        r = do_press("enter")
+        if r != "ok":
+            return f"error:launch failed ({r})"
+        time.sleep(1.0)
+    except Exception as e:
+        print(traceback.format_exc())
+        return f"error:{e}"
+    return "ok"
+
+
+def do_open_url(url: str) -> str:
+    """Open http(s) URL in default browser. Returns ok|invalid|error."""
+    clean = sanitize_url(url)
+    if not clean:
+        return "invalid"
+    print(f"[OPEN_URL] {clean!r} on {sys.platform}")
+    if is_dry_run():
+        print(f"[DRY_RUN] would open url: {clean!r}")
+        return "ok"
+    try:
+        webbrowser.open(clean)
+    except Exception as e:
+        print(traceback.format_exc())
+        return f"error:{e}"
+    return "ok"
+
+
+def do_web_search(query: str) -> str:
+    """Indirect lookup via Google search URL. Returns ok|invalid|error."""
+    query = (query or "").strip()
+    if not query or len(query) > MAX_SEARCH_LEN:
+        return "invalid"
+    url = "https://www.google.com/search?q=" + quote_plus(query)
+    return do_open_url(url)
+
+
+def do_wait(seconds: float = 1.0) -> str:
+    """Gap between helper steps so apps/pages load. Capped at MAX_WAIT."""
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return "error:seconds must be a number"
+    seconds = max(0.5, min(MAX_WAIT, seconds))
+    print(f"[WAIT] {seconds}s on {sys.platform}")
+    if is_dry_run():
+        print(f"[DRY_RUN] would wait: {seconds}s")
+        return "ok"
+    time.sleep(seconds)
+    return "ok"
+
+
+def do_focus_bar() -> str:
+    """Focus browser/address bar (ctrl+l). Indirect helper primitive."""
+    return do_press("ctrl+l")
+
+
+def do_new_tab() -> str:
+    """Open a new browser tab (ctrl+t). Indirect helper primitive."""
+    return do_press("ctrl+t")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Host input control (no Discord needed)")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -268,6 +381,10 @@ def main() -> None:
     group.add_argument("--click", nargs="?", const="left", help="left|right|middle")
     group.add_argument("--double-click", dest="double_click", nargs="?", const="left",
                        help="double click left|right|middle")
+    group.add_argument("--open-app", dest="open_app", help='e.g. "chrome"')
+    group.add_argument("--open-url", dest="open_url", help='e.g. "https://example.com"')
+    group.add_argument("--search", dest="search", help='e.g. "lofi hip hop"')
+    group.add_argument("--wait", dest="wait", type=float, help="seconds 0.5-5")
     group.add_argument("--shot", action="store_true", help="save screenshot to shots/")
     group.add_argument("--diag", action="store_true", help="print diagnostics")
     args = parser.parse_args()
@@ -283,6 +400,14 @@ def main() -> None:
         print(do_click(args.double_click, clicks=2))
     elif args.click is not None:
         print(do_click(args.click, clicks=1))
+    elif args.open_app is not None:
+        print(do_open_app(args.open_app))
+    elif args.open_url is not None:
+        print(do_open_url(args.open_url))
+    elif args.search is not None:
+        print(do_web_search(args.search))
+    elif args.wait is not None:
+        print(do_wait(args.wait))
     elif args.shot:
         print(take_screenshot())
     else:
