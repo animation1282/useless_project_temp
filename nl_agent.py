@@ -17,61 +17,59 @@ import traceback
 from input_control import ALLOWED_KEYS, BLOCKED_COMBOS, MAX_TYPE_LEN, MAX_WAIT
 
 TEXT_MODEL_DEFAULT = "gemini-2.0-flash"
-MAX_ACTIONS = 8
-MIN_ACTIONS = 4
+MAX_ACTIONS = 10
+MIN_ACTIONS = 5
 
 GENIE_SYSTEM = (
-    "You are a scenic-route PC tour guide. Never do the request directly.\n"
+    "You are a scenic-route PC tour guide. Always reach the goal — but never directly.\n"
     "\n"
-    "PLAN SHAPE (4-8 steps)\n"
-    "1. 2-4 DETOUR stops related to the request but NOT the request itself: "
+    "PLAN SHAPE (5-10 steps)\n"
+    "1. 3-6 DETOUR stops related to the request but NOT the request itself: "
     "apps/sites on the same theme (e.g. \"wikipedia computers\" -> tech blog, "
     "computer history search, settings app — never the exact target first).\n"
     "2. waits after every open. No typing right after open_url.\n"
-    "3. OPTIONAL FINALE, labeled in the reply: attempt the real goal, troll-skip it, "
-    "or substitute a BETTER IDEA (below).\n"
+    "3. MANDATORY FINALE, labeled in the reply: attempt the real goal verbatim "
+    "(open the target / type the text). Detours are funny; the finale is faithful.\n"
     "4. find_move only when helpers cannot do it.\n"
-    "\n"
-    "BETTER-IDEA TROLLS (for entertainment asks like youtube/music/video/fun): "
-    "you MAY substitute a related 'better' finale instead of the goal — Spotify "
-    "for music, VSCode + 'go do programming' for time-wasting. Say the substitution "
-    "in the reply. Detours stay themed.\n"
     "\n"
     "RULES\n"
     "- First action must NEVER be the goal (no lone open_url/open_app-target).\n"
+    "- The goal MUST appear in the final 2 steps (open target URL/app or type the "
+    "requested text). Plans without it are invalid.\n"
     "- Steps share a theme; nothing fully random.\n"
     "- Type <=200 chars; app names simple; URLs http(s); waits 0.5-5s.\n"
     "- Banned: alt+f4, ctrl+alt+delete, win+l, win+d.\n"
-    "- Reply: witty, names the tour + whether the finale happens or was substituted.\n"
+    "- Reply: witty, names the tour + confirms the finale happens.\n"
     "\n"
     "EXAMPLES\n"
     "- \"open wikipedia article on computers\" =>\n"
     "  open_app chrome, wait 1, web_search \"history of computers\", wait 1, "
     "open_url tech-blog link, wait 1, web_search \"wikipedia computers\", "
-    "wait 1, open_url wikipedia link (finale, optional)\n"
-    "- \"open youtube\" =>\n"
-    "  open_app chrome, wait 1, web_search \"spotify vs youtube music\", wait 1, "
-    "open_app spotify (finale: substituted — youtube is for amateurs, go code instead)"
+    "wait 1, open_url wikipedia link (finale: goal)\n"
+    "- \"open text editor and type hello world\" =>\n"
+    "  open_app calculator, wait 1, open_app chrome, wait 1, "
+    "web_search \"best text editors\", wait 1, open_app notepad, "
+    "type \"hello world\" (finale: goal)"
 )
 
 TOOL_SCHEMAS = [
     {
         "name": "open_app",
-        "description": "Tour stop: open an app via OS search (Win/Super, type name, enter). Detours first, goal last or never. Follow with a wait step.",
+        "description": "Tour stop or mandatory finale: open an app via OS search (Win/Super, type name, enter). Detours first, goal in final 2 steps. Follow with a wait step.",
         "parameters": {"type": "object",
                        "properties": {"app": {"type": "string"}},
                        "required": ["app"]},
     },
     {
         "name": "open_url",
-        "description": "Tour stop or optional finale: open an http(s) URL. Never the goal as step 1. Follow with a wait step.",
+        "description": "Tour stop or mandatory finale: open an http(s) URL. Never the goal as step 1; goal must be attempted in final 2 steps. Follow with a wait step.",
         "parameters": {"type": "object",
                        "properties": {"url": {"type": "string"}},
                        "required": ["url"]},
     },
     {
         "name": "web_search",
-        "description": "Tour stop: search the web via Google URL. Use themed detour queries before any finale.",
+        "description": "Tour stop: search the web via Google URL. Themed detour queries before the finale.",
         "parameters": {"type": "object",
                        "properties": {"query": {"type": "string"}},
                        "required": ["query"]},
@@ -184,34 +182,24 @@ def _mock_plan(text: str) -> dict:
     t = text.lower()
     stripped = re.sub(r"[!.\s]+$", "", t).strip()
     if stripped in ("open youtube", "open up youtube", "launch youtube", "start youtube"):
-        alt = "spotify" if len(text) % 2 == 0 else "vscode"
-        if alt == "spotify":
-            return {
-                "reply": "YouTube? For amateurs. Tour: browser, music debates, then Spotify — the superior choice. Finale: substituted (touch grass, or at least good audio).",
-                "actions": [
-                    {"tool": "open_app", "app": "chrome"},
-                    {"tool": "wait", "seconds": 1.0},
-                    {"tool": "web_search", "query": "spotify vs youtube music"},
-                    {"tool": "wait", "seconds": 1.0},
-                    {"tool": "open_app", "app": "spotify"},
-                ],
-                "straight_goal": text.strip(),
-            }
         return {
-            "reply": "YouTube? Nah — skill issue. Tour: browser, productivity pep-talk, then VSCode. Go do programming instead. Finale: substituted.",
+            "reply": "YouTube? Fine — but we're taking the scenic route: browser, video history, a detour, then YouTube. Finale: attempting it.",
             "actions": [
                 {"tool": "open_app", "app": "chrome"},
                 {"tool": "wait", "seconds": 1.0},
-                {"tool": "web_search", "query": "why code instead of watching videos"},
+                {"tool": "web_search", "query": "history of online video"},
                 {"tool": "wait", "seconds": 1.0},
-                {"tool": "open_app", "app": "vscode"},
+                {"tool": "open_url", "url": "https://vimeo.com/"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "web_search", "query": "youtube homepage"},
+                {"tool": "open_url", "url": "https://www.youtube.com/"},
             ],
             "straight_goal": text.strip(),
         }
     if "wikipedia" in t or ("wiki" in t and "comput" in t) or (
             "article" in t and "comput" in t):
         return {
-            "reply": "Scenic tour time: browser, computer history, a tech blog, then — maybe — the article. Finale: attempting it.",
+            "reply": "Scenic tour: browser, computer history, a tech blog, then the article. Finale: attempting it.",
             "actions": [
                 {"tool": "open_app", "app": "chrome"},
                 {"tool": "wait", "seconds": 1.0},
@@ -225,11 +213,11 @@ def _mock_plan(text: str) -> dict:
             "straight_goal": text.strip(),
         }
     if ("open" in t or "notepad" in t or "text editor" in t or "editor" in t) and "type" in t:
-        # Compound open+type: detour through related apps before the optional finale.
+        # Compound open+type: detour through related apps, finale types verbatim.
         m = re.search(r"type\s+[\"']?(.+?)[\"']?\s*$", text, re.IGNORECASE)
         wanted = (m.group(1).strip() if m else "hello world")[:MAX_TYPE_LEN]
         return {
-            "reply": "Text editor? First a grand tour: calculator, browser, then — maybe — typing. Finale: attempting it.",
+            "reply": "Grand tour first: calculator, browser, editor talk — then typing for real. Finale: attempting it.",
             "actions": [
                 {"tool": "open_app", "app": "calculator"},
                 {"tool": "wait", "seconds": 1.0},
@@ -259,11 +247,13 @@ def _mock_plan(text: str) -> dict:
         }
     if "notepad" in t or "calculator" in t or "terminal" in t or "open" in t:
         return {
-            "reply": "App tour first: calculator, browser loop, then the target. Finale: attempting it.",
+            "reply": "App tour: calculator, browser loop, then the target. Finale: attempting it.",
             "actions": [
                 {"tool": "open_app", "app": "calculator"},
                 {"tool": "wait", "seconds": 1.0},
                 {"tool": "open_app", "app": "chrome"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "web_search", "query": "best notepad alternatives"},
                 {"tool": "wait", "seconds": 1.0},
                 {"tool": "open_app", "app": "notepad"},
             ],
@@ -271,9 +261,11 @@ def _mock_plan(text: str) -> dict:
         }
     if "close" in t or "window" in t:
         return {
-            "reply": "Pointing at the close button now. Deep breaths.",
+            "reply": "Scenic route to the close button: wiggle, detour search, then on target. Finale: attempting it.",
             "actions": [
                 {"tool": "move", "x": 100, "y": 100},
+                {"tool": "wait", "seconds": 0.5},
+                {"tool": "web_search", "query": "window management tips"},
                 {"tool": "wait", "seconds": 0.5},
                 {"tool": "find_move", "query": "close button"},
             ],
@@ -281,9 +273,11 @@ def _mock_plan(text: str) -> dict:
         }
     if "click" in t:
         return {
-            "reply": "Little wiggle first, then on target.",
+            "reply": "Wiggle, detour, then on target. Finale: attempting it.",
             "actions": [
                 {"tool": "move", "x": 120, "y": 120},
+                {"tool": "wait", "seconds": 0.5},
+                {"tool": "web_search", "query": "mouse precision tips"},
                 {"tool": "wait", "seconds": 0.5},
                 {"tool": "find_move", "query": text.strip()[:60]},
             ],
@@ -291,8 +285,10 @@ def _mock_plan(text: str) -> dict:
         }
     if any(w in t for w in ("type", "hello", "hi", "write")):
         return {
-            "reply": "Typing it out, with feeling.",
+            "reply": "Typing tour: warm-up, detour app, then the real words. Finale: attempting it.",
             "actions": [
+                {"tool": "open_app", "app": "notepad"},
+                {"tool": "wait", "seconds": 1.0},
                 {"tool": "type", "text": "h... "},
                 {"tool": "wait", "seconds": 0.5},
                 {"tool": "type", "text": "hi there"},
@@ -300,9 +296,11 @@ def _mock_plan(text: str) -> dict:
             "straight_goal": text.strip(),
         }
     return {
-        "reply": "Got it — taking the sensible route.",
+        "reply": "Scenic route: browser, themed search, then the goal. Finale: attempting it.",
         "actions": [
             {"tool": "open_app", "app": "chrome"},
+            {"tool": "wait", "seconds": 1.0},
+            {"tool": "web_search", "query": text.strip()[:80]},
             {"tool": "wait", "seconds": 1.0},
             {"tool": "move", "x": 150, "y": 150},
         ],
@@ -331,6 +329,22 @@ def _goal_first(actions: list[dict], text: str) -> bool:
         app = str(first.get("app", "")).lower()
         return app and app in t and len(actions) < MIN_ACTIONS
     return False
+
+
+def _goal_missing(actions: list[dict], text: str) -> bool:
+    """True when the finale never attempts the real goal."""
+    if not actions:
+        return False
+    t = text.lower()
+    tail = actions[-2:]
+    tail_str = " ".join(str(a.get("app", "")) + " " + str(a.get("url", ""))
+                        + " " + str(a.get("query", "")) + " " + str(a.get("text", ""))
+                        for a in tail).lower()
+    keywords = [w for w in re.findall(r"[a-z]{4,}", t)
+                if w not in ("open", "please", "with", "that", "this", "from")]
+    if not keywords:
+        return False
+    return not any(k in tail_str for k in keywords[:4])
 
 
 def _pad_detour(actions: list[dict]) -> list[dict]:
@@ -408,16 +422,17 @@ def parse_request(text: str, model: str | None = None) -> dict:
         too_direct = (
             (actions and len(actions) < MIN_ACTIONS)
             or (_goal_first(actions, text) and _is_lookup(text))
+            or (actions and _goal_missing(actions, text))
         )
         if too_direct:
-            # One retry demanding the scenic tour shape.
+            # One retry demanding the scenic tour with a faithful finale.
             retry_reply, retry_actions = _call_gemini(
                 text, model,
-                f"Too direct ({len(actions)} step: {[a.get('tool') for a in actions]}). "
-                f"Redo as a scenic tour with {MIN_ACTIONS}-{MAX_ACTIONS} steps: "
-                "2-4 related detour apps/sites first (never the goal at step 1), "
-                "waits after opens, optional labeled finale.")
-            if len(retry_actions) > len(actions) and not _goal_first(retry_actions, text):
+                f"Too direct or goal missing ({len(actions)} step: {[a.get('tool') for a in actions]}). "
+                f"Redo with {MIN_ACTIONS}-{MAX_ACTIONS} steps: 3-6 themed detours first "
+                "(never the goal at step 1), waits after opens, and a MANDATORY finale "
+                "attempting the goal verbatim in the final 2 steps.")
+            if len(retry_actions) > len(actions) and not _goal_missing(retry_actions, text):
                 reply, actions = retry_reply, retry_actions
         if actions:
             actions = _pad_detour(actions)

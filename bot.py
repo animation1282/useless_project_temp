@@ -13,7 +13,7 @@ from vision_gemini import find_target
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-APPROVAL_TIMEOUT = 60.0
+APPROVAL_TIMEOUT = 90.0
 NL_COOLDOWN = 5.0
 
 intents = discord.Intents.default()
@@ -273,7 +273,7 @@ async def handle_nl_message(message: discord.Message) -> None:
     proposal = await message.reply(
         f"{reply}\n**You asked:** {plan.get('straight_goal', '')}\n"
         f"**Planned steps ({len(actions)}/{MAX_ACTIONS} max):** {describe_actions(actions)}\n"
-        f"React ✅ to unleash, ❌ to spare your PC (60s, you only)."
+        f"React ✅ to unleash, ❌ to spare your PC (90s, you only)."
     )
     pending[proposal.id] = {"actions": actions, "query": message.content,
                             "requester_id": message.author.id, "reply": reply}

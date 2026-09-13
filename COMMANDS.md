@@ -19,10 +19,10 @@
 
 ## Natural-language planner (same Gemini API/key)
 
-- All non-`!` messages → `parse_request` (5s/user NL cooldown, shows `typing…`) → `{witty reply + 4-8 tour actions + straight_goal}`.
-- Style: scenic route, never direct — 2-4 related detour apps/sites first (never the goal at step 1), waits after opens, optional labeled finale (goal attempted, troll-skipped, or better-idea substituted, e.g. bare `open youtube` → Spotify/VSCode + “go program instead”). Re-validated (app allowlist, http(s) URLs, `ALLOWED_KEYS`, `BLOCKED_COMBOS`, 200-char cap, wait 0.5-5s).
+- All non-`!` messages → `parse_request` (5s/user NL cooldown, shows `typing…`) → `{witty reply + 5-10 tour actions + straight_goal}`.
+- Style: scenic route that always reaches the goal — 3-6 related detour apps/sites first (never the goal at step 1), waits after opens, mandatory finale attempting the goal verbatim. Re-validated (app allowlist, http(s) URLs, `ALLOWED_KEYS`, `BLOCKED_COMBOS`, 200-char cap, wait 0.5-5s).
 - Style: practical helper chains with at most one small joke (eg `play lofi` → `open_app browser` + `web_search` + `open_url`; `open wikipedia article on computers` → `open_app` + `web_search` + `open_url`, never a lone guessed URL), fresh roast each time, cheeky-but-safe. Troll endings allowed if labeled; pads are `wait`/`move` only, never filler typing.
-- Approval ON: proposal shows `You asked / Planned steps (n/8 max)`, adds ✅/❌, 60s requester-only vote → executes sequentially (early-stop on failure) or cancels with a quip.
+- Approval ON: proposal shows `You asked / Planned steps (n/10 max)`, adds ✅/❌, 90s requester-only vote → executes sequentially (early-stop on failure) or cancels with a quip.
 - Approval OFF: executes immediately with a funny report.
 - No-action messages: banter-only reply, nothing is touched.
 
@@ -32,7 +32,7 @@
   - CLI: `--press`, `--type`, `--open-app`, `--open-url`, `--search`, `--wait`, `--move X Y`, `--click`, `--double-click`, `--shot`, `--diag`.
   - `DRY_RUN=1` mocks all actions and writes dummy screenshots.
 - `vision_gemini.py`: `find_target(image, query)` → absolute pixels, `VISION_MOCK=1` offline mode, JSON fallback.
-- `nl_agent.py`: `parse_request`, `describe_actions`, `LLM_MOCK=1` mock mode, `MAX_ACTIONS=8`.
+- `nl_agent.py`: `parse_request`, `describe_actions`, `LLM_MOCK=1` mock mode, `MIN 5 / MAX 10`.
 
 ## Safety / storage / config
 
