@@ -1,0 +1,27 @@
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 60px; text-align: left; }
+header h1 { font-size: 34px; margin: 0 0 8px; color: var(--text-h); }
+.sub { margin-bottom: 16px; }
+.tabs { display: flex; gap: 8px; margin: 12px 0 20px; }
+.tabs button { padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border); background: var(--social-bg); cursor: pointer; font-size: 15px; }
+.tabs button.active { background: var(--accent-bg); border-color: var(--accent-border); color: var(--text-h); }
+.card { border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; background: var(--bg); }
+.card h2 { font-size: 17px; margin: 18px 0 8px; color: var(--text-h); }
+.card h2:first-child { margin-top: 0; }
+.drop { border: 2px dashed var(--border); border-radius: 10px; padding: 26px; text-align: center; position: relative; cursor: pointer; }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--code-bg); color: var(--text-h); word-break: break-all; }
+.row { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.row button, .filebtn { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent-border); background: var(--accent-bg); color: var(--text-h); cursor: pointer; font-size: 14px; }
+.preview { max-width: 100%; max-height: 320px; border-radius: 8px; margin-top: 12px; border: 1px solid var(--border); }
+.meta { font-size: 13px; margin-top: 8px; }
+.ok { color: #16a34a; }
+.err { color: #dc2626; font-size: 14px; }
+footer { font-size: 13px; opacity: 0.8; }
+details { margin-top: 12px; font-size: 13px; }
+code { font-size: 13px; }
+label input[type="number"] { width: 90px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 14px; margin: 8px 0; }
+.sliders { display: grid; gap: 10px; margin: 10px 0; }
+.sliders label { display: grid; gap: 4px; font-size: 14px; }
+.sliders input[type="range"] { width: 100%; }
+.sliders select { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text-h); }
