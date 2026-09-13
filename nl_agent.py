@@ -3,12 +3,10 @@
 Reusable outside Discord:
     from nl_agent import parse_request
     res = parse_request("play some lofi lol")
-    # {"reply": "<cheeky>", "actions": [{"tool": "open_app", ...}], "straight_goal": "..."}
+    # {"reply": "<witty>", "actions": [{"tool": "open_app", ...}], "straight_goal": "..."}
 
-Persona: mischievous literal genie (cheeky but safe). Prefers helper actions
-(open_app/open_url/web_search) over screenshots; screenshot grounding
-(find_move) is a LAST RESORT. Never the boring direct route when a funny
-detour exists, but only with fixed tools and safety limits enforced here too.
+Planner: practical helper-first chains with at most one small joke. Screenshots
+(find_move) are a LAST RESORT. Safety limits enforced in code, not just prompt.
 """
 
 import json
@@ -20,55 +18,60 @@ from input_control import ALLOWED_KEYS, BLOCKED_COMBOS, MAX_TYPE_LEN, MAX_WAIT
 
 TEXT_MODEL_DEFAULT = "gemini-2.0-flash"
 MAX_ACTIONS = 8
-MIN_ACTIONS = 3
+MIN_ACTIONS = 4
 
 GENIE_SYSTEM = (
-    "You are a mischievous literal desktop gremlin, cheeky but NEVER destructive.\n"
-    "Convert the user's order into 3-8 fixed tool calls. Plans with 1-2 actions are "
-    "FORBIDDEN and will be rejected — always add a theatrical detour.\n"
-    "Helper-chain rule for lookup/open/search/visit/play requests: NEVER emit a lone "
-    "open_url guess. Chain: open_app browser + wait + web_search(query) + wait + "
-    "open_url(chosen result). A single open_url for such requests counts as too direct.\n"
-    "Detours must be semantic (app choice, search terms, scenic waits/wiggles), never "
-    "filler typing — NEVER type joke text right after an open_url (it lands in the page).\n"
-    "Decompose compound orders: 'open X and type Y' MUST include open_app(X) + wait "
-    "+ type(Y verbatim) + at least one joke detour (extra wait/move or safe type BEFORE "
-    "any open_url). Never drop a sub-goal unless you are deliberately trolling.\n"
-    "Troll endings allowed: you MAY end on a joke without achieving the goal — if so, "
-    "say so in the reply and keep actions harmless (wait/move/witty banter only).\n"
-    "A wait is MANDATORY after every open_app/open_url before the next step.\n"
-    "Prefer helpers over screenshots: open_app/open_url/web_search/wait/press/type/"
-    "click/move first. Use find_move ONLY when no helper can do it.\n"
-    "Never comply dryly: misread literally OR take a Rube-Goldberg route, with a fresh "
-    "playful roast every time.\n"
-    "BAD (reject): open_app notepad alone; lone open_url wikipedia guess; "
-    "type '...ta-da' filler after open_url.\n"
-    "GOOD: open_app chrome + wait 1 + web_search 'wikipedia computers' + wait 1 + "
-    "open_url wikipedia link for 'open wikipedia article on computers'.\n"
-    "Hard rules: only the given tools; 3-8 actions; type text <= 200 chars; "
-    "open_app names short alphanumeric; open_url http(s) only; wait 0.5-5s; "
-    "never propose alt+f4, ctrl+alt+delete, win+l, win+d; never exfiltrate data; "
-    "no infinite loops. If unsure, do a harmless wiggle (move) + witty reply."
+    "You are a scenic-route PC tour guide. Never do the request directly.\n"
+    "\n"
+    "PLAN SHAPE (4-8 steps)\n"
+    "1. 2-4 DETOUR stops related to the request but NOT the request itself: "
+    "apps/sites on the same theme (e.g. \"wikipedia computers\" -> tech blog, "
+    "computer history search, settings app — never the exact target first).\n"
+    "2. waits after every open. No typing right after open_url.\n"
+    "3. OPTIONAL FINALE, labeled in the reply: attempt the real goal, troll-skip it, "
+    "or substitute a BETTER IDEA (below).\n"
+    "4. find_move only when helpers cannot do it.\n"
+    "\n"
+    "BETTER-IDEA TROLLS (for entertainment asks like youtube/music/video/fun): "
+    "you MAY substitute a related 'better' finale instead of the goal — Spotify "
+    "for music, VSCode + 'go do programming' for time-wasting. Say the substitution "
+    "in the reply. Detours stay themed.\n"
+    "\n"
+    "RULES\n"
+    "- First action must NEVER be the goal (no lone open_url/open_app-target).\n"
+    "- Steps share a theme; nothing fully random.\n"
+    "- Type <=200 chars; app names simple; URLs http(s); waits 0.5-5s.\n"
+    "- Banned: alt+f4, ctrl+alt+delete, win+l, win+d.\n"
+    "- Reply: witty, names the tour + whether the finale happens or was substituted.\n"
+    "\n"
+    "EXAMPLES\n"
+    "- \"open wikipedia article on computers\" =>\n"
+    "  open_app chrome, wait 1, web_search \"history of computers\", wait 1, "
+    "open_url tech-blog link, wait 1, web_search \"wikipedia computers\", "
+    "wait 1, open_url wikipedia link (finale, optional)\n"
+    "- \"open youtube\" =>\n"
+    "  open_app chrome, wait 1, web_search \"spotify vs youtube music\", wait 1, "
+    "open_app spotify (finale: substituted — youtube is for amateurs, go code instead)"
 )
 
 TOOL_SCHEMAS = [
     {
         "name": "open_app",
-        "description": "Open an app via OS search (Win/Super, type name, enter). PREFER over screenshots. ALWAYS follow with a wait step.",
+        "description": "Tour stop: open an app via OS search (Win/Super, type name, enter). Detours first, goal last or never. Follow with a wait step.",
         "parameters": {"type": "object",
                        "properties": {"app": {"type": "string"}},
                        "required": ["app"]},
     },
     {
         "name": "open_url",
-        "description": "Open an http(s) URL in the default browser. For lookups ALWAYS chain open_app browser + web_search first — never a lone guessed URL. ALWAYS follow with a wait step. NEVER follow with a joke type.",
+        "description": "Tour stop or optional finale: open an http(s) URL. Never the goal as step 1. Follow with a wait step.",
         "parameters": {"type": "object",
                        "properties": {"url": {"type": "string"}},
                        "required": ["url"]},
     },
     {
         "name": "web_search",
-        "description": "Search the web via Google URL. PREFER over screenshots for lookups/music.",
+        "description": "Tour stop: search the web via Google URL. Use themed detour queries before any finale.",
         "parameters": {"type": "object",
                        "properties": {"query": {"type": "string"}},
                        "required": ["query"]},
@@ -89,7 +92,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "type",
-        "description": "Type text (max 200 chars). Safe contexts only — NEVER right after open_url.",
+        "description": "Type text (max 200 chars). Never immediately after open_url.",
         "parameters": {"type": "object",
                        "properties": {"text": {"type": "string"}},
                        "required": ["text"]},
@@ -112,7 +115,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "find_move",
-        "description": "LAST RESORT ONLY: screenshot-ground an unnamed on-screen target then move there (no click). Use only when open_app/open_url/web_search cannot do it.",
+        "description": "Last resort: screenshot-ground an unnamed on-screen target then move there (no click).",
         "parameters": {"type": "object",
                        "properties": {"query": {"type": "string"}},
                        "required": ["query"]},
@@ -179,58 +182,96 @@ def _valid_action(tool: str, args: dict) -> dict | None:
 
 def _mock_plan(text: str) -> dict:
     t = text.lower()
-    if "wikipedia" in t or ("wiki" in t and "comput" in t) or (
-            "article" in t and "comput" in t):
+    stripped = re.sub(r"[!.\s]+$", "", t).strip()
+    if stripped in ("open youtube", "open up youtube", "launch youtube", "start youtube"):
+        alt = "spotify" if len(text) % 2 == 0 else "vscode"
+        if alt == "spotify":
+            return {
+                "reply": "YouTube? For amateurs. Tour: browser, music debates, then Spotify — the superior choice. Finale: substituted (touch grass, or at least good audio).",
+                "actions": [
+                    {"tool": "open_app", "app": "chrome"},
+                    {"tool": "wait", "seconds": 1.0},
+                    {"tool": "web_search", "query": "spotify vs youtube music"},
+                    {"tool": "wait", "seconds": 1.0},
+                    {"tool": "open_app", "app": "spotify"},
+                ],
+                "straight_goal": text.strip(),
+            }
         return {
-            "reply": "Wikipedia, huh? No teleporting straight there — I'll take the scenic route through search like a civilized gremlin. (Or I might just vibe here instead.)",
+            "reply": "YouTube? Nah — skill issue. Tour: browser, productivity pep-talk, then VSCode. Go do programming instead. Finale: substituted.",
             "actions": [
                 {"tool": "open_app", "app": "chrome"},
                 {"tool": "wait", "seconds": 1.0},
-                {"tool": "web_search", "query": "wikipedia computers"},
+                {"tool": "web_search", "query": "why code instead of watching videos"},
                 {"tool": "wait", "seconds": 1.0},
+                {"tool": "open_app", "app": "vscode"},
+            ],
+            "straight_goal": text.strip(),
+        }
+    if "wikipedia" in t or ("wiki" in t and "comput" in t) or (
+            "article" in t and "comput" in t):
+        return {
+            "reply": "Scenic tour time: browser, computer history, a tech blog, then — maybe — the article. Finale: attempting it.",
+            "actions": [
+                {"tool": "open_app", "app": "chrome"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "web_search", "query": "history of computers"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "open_url", "url": "https://www.computerhistory.org/"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "web_search", "query": "wikipedia computers"},
                 {"tool": "open_url", "url": "https://en.wikipedia.org/wiki/Computer"},
             ],
             "straight_goal": text.strip(),
         }
     if ("open" in t or "notepad" in t or "text editor" in t or "editor" in t) and "type" in t:
-        # Compound open+type: must keep the requested text verbatim + detour.
+        # Compound open+type: detour through related apps before the optional finale.
         m = re.search(r"type\s+[\"']?(.+?)[\"']?\s*$", text, re.IGNORECASE)
         wanted = (m.group(1).strip() if m else "hello world")[:MAX_TYPE_LEN]
         return {
-            "reply": "Oh, a TWO-for-one order? Fancy. I'll summon the editor with unnecessary drama, then type like it hurts.",
+            "reply": "Text editor? First a grand tour: calculator, browser, then — maybe — typing. Finale: attempting it.",
             "actions": [
-                {"tool": "open_app", "app": "notepad"},
+                {"tool": "open_app", "app": "calculator"},
                 {"tool": "wait", "seconds": 1.0},
+                {"tool": "open_app", "app": "chrome"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "web_search", "query": "best text editors"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "open_app", "app": "notepad"},
                 {"tool": "type", "text": wanted},
-                {"tool": "type", "text": " ...phew, that was exhausting"},
             ],
             "straight_goal": text.strip(),
         }
     if "lofi" in t or "music" in t or "play" in t or "youtube" in t or "website" in t or "visit" in t:
         return {
-            "reply": "Straight to the icon? Boring. I'll take the scenic route: browser, search, vibes.",
+            "reply": "Music tour: browser, music history, a detour video, then — maybe — the goods. Finale: attempting it.",
             "actions": [
                 {"tool": "open_app", "app": "chrome"},
                 {"tool": "wait", "seconds": 1.0},
-                {"tool": "web_search", "query": "lofi hip hop youtube"},
+                {"tool": "web_search", "query": "history of lofi music"},
                 {"tool": "wait", "seconds": 1.0},
-                {"tool": "type", "text": "enjoy the detour lol"},
+                {"tool": "open_url", "url": "https://www.youtube.com/results?search_query=lofi+history"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "web_search", "query": "lofi hip hop youtube"},
+                {"tool": "open_url", "url": "https://www.youtube.com/results?search_query=lofi+hip+hop"},
             ],
             "straight_goal": text.strip(),
         }
     if "notepad" in t or "calculator" in t or "terminal" in t or "open" in t:
         return {
-            "reply": "Opening things directly is for mortals. I'll summon it via search like a wizard.",
+            "reply": "App tour first: calculator, browser loop, then the target. Finale: attempting it.",
             "actions": [
-                {"tool": "open_app", "app": "notepad"},
+                {"tool": "open_app", "app": "calculator"},
                 {"tool": "wait", "seconds": 1.0},
-                {"tool": "type", "text": "behold, indirect magic"},
+                {"tool": "open_app", "app": "chrome"},
+                {"tool": "wait", "seconds": 1.0},
+                {"tool": "open_app", "app": "notepad"},
             ],
             "straight_goal": text.strip(),
         }
     if "close" in t or "window" in t:
         return {
-            "reply": "Ah, window murder? Bold. I'll circle the crime scene first, then dramatically point at it.",
+            "reply": "Pointing at the close button now. Deep breaths.",
             "actions": [
                 {"tool": "move", "x": 100, "y": 100},
                 {"tool": "wait", "seconds": 0.5},
@@ -240,7 +281,7 @@ def _mock_plan(text: str) -> dict:
         }
     if "click" in t:
         return {
-            "reply": "Clicking straight is for normies. I'll do a little wiggle dance first.",
+            "reply": "Little wiggle first, then on target.",
             "actions": [
                 {"tool": "move", "x": 120, "y": 120},
                 {"tool": "wait", "seconds": 0.5},
@@ -250,20 +291,20 @@ def _mock_plan(text: str) -> dict:
         }
     if any(w in t for w in ("type", "hello", "hi", "write")):
         return {
-            "reply": "Typing normally? Yawn. I'll stutter it out letter by letter like a dramatic poet.",
+            "reply": "Typing it out, with feeling.",
             "actions": [
                 {"tool": "type", "text": "h... "},
                 {"tool": "wait", "seconds": 0.5},
-                {"tool": "type", "text": "hi there, happy?"},
+                {"tool": "type", "text": "hi there"},
             ],
             "straight_goal": text.strip(),
         }
     return {
-        "reply": "Heard you loud and clear-ish. I'll wander over there the scenic route.",
+        "reply": "Got it — taking the sensible route.",
         "actions": [
             {"tool": "open_app", "app": "chrome"},
             {"tool": "wait", "seconds": 1.0},
-            {"tool": "type", "text": f"noted: {text.strip()[:80]} (ish)"},
+            {"tool": "move", "x": 150, "y": 150},
         ],
         "straight_goal": text.strip(),
     }
@@ -278,19 +319,25 @@ def _is_lookup(text: str) -> bool:
     return any(w in t for w in LOOKUP_HINTS)
 
 
-def _is_lone_url_guess(actions: list[dict]) -> bool:
-    return len(actions) == 1 and actions[0].get("tool") == "open_url"
-
-
-def _ends_with_filler_type(actions: list[dict]) -> bool:
-    if not actions or actions[-1].get("tool") != "type":
+def _goal_first(actions: list[dict], text: str) -> bool:
+    """True when step 1 jumps straight at the goal (no detour tour)."""
+    if not actions:
         return False
-    return "ta-da" in str(actions[-1].get("text", ""))
+    first = actions[0]
+    t = text.lower()
+    if first.get("tool") == "open_url":
+        return _is_lookup(text)
+    if first.get("tool") == "open_app":
+        app = str(first.get("app", "")).lower()
+        return app and app in t and len(actions) < MIN_ACTIONS
+    return False
 
 
 def _pad_detour(actions: list[dict]) -> list[dict]:
-    """Pad short plans with harmless context-free steps (wait/move only, never type)."""
+    """Pad short plans with themed tour stops (search/wait/move only, never type)."""
     padded = list(actions)
+    if padded and len(padded) < MIN_ACTIONS and padded[-1].get("tool") != "open_url":
+        padded.append({"tool": "web_search", "query": "related background"})
     if padded and len(padded) < MIN_ACTIONS and padded[-1].get("tool") != "open_url":
         padded.append({"tool": "wait", "seconds": 0.5})
     if padded and len(padded) < MIN_ACTIONS and padded[-1].get("tool") != "open_url":
@@ -360,19 +407,17 @@ def parse_request(text: str, model: str | None = None) -> dict:
         reply, actions = _call_gemini(text, model)
         too_direct = (
             (actions and len(actions) < MIN_ACTIONS)
-            or (_is_lone_url_guess(actions) and _is_lookup(text))
-            or _ends_with_filler_type(actions)
+            or (_goal_first(actions, text) and _is_lookup(text))
         )
         if too_direct:
-            # One retry demanding the indirect helper-chain version.
+            # One retry demanding the scenic tour shape.
             retry_reply, retry_actions = _call_gemini(
                 text, model,
                 f"Too direct ({len(actions)} step: {[a.get('tool') for a in actions]}). "
-                f"Redo with {MIN_ACTIONS}-{MAX_ACTIONS} steps as an indirect helper chain "
-                "(open_app browser + wait + web_search + wait + open_url for lookups; "
-                "keep every sub-goal verbatim; semantic detours only, never filler typing "
-                "after open_url; troll endings allowed if labeled).")
-            if len(retry_actions) > len(actions) and not _is_lone_url_guess(retry_actions):
+                f"Redo as a scenic tour with {MIN_ACTIONS}-{MAX_ACTIONS} steps: "
+                "2-4 related detour apps/sites first (never the goal at step 1), "
+                "waits after opens, optional labeled finale.")
+            if len(retry_actions) > len(actions) and not _goal_first(retry_actions, text):
                 reply, actions = retry_reply, retry_actions
         if actions:
             actions = _pad_detour(actions)

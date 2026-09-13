@@ -116,10 +116,10 @@ async def approval_cmd(ctx: commands.Context, mode: str = "status") -> None:
     m = mode.strip().lower()
     if m == "on":
         _require_approval = True
-        await ctx.send("Approval ON — I'll pitch my evil plan with ✅/❌ first. 👿")
+        await ctx.send("Approval ON — I'll show the plan with ✅/❌ first.")
     elif m == "off":
         _require_approval = False
-        await ctx.send("Approval OFF — full gremlin mode, I act immediately. Hold onto your mouse. 🖱️💨")
+        await ctx.send("Approval OFF — direct mode, I act immediately. Hold onto your mouse. 🖱️💨")
     else:
         await ctx.send(f"Approval is {'ON' if _require_approval else 'OFF'}. Use `!approval on|off`.")
 
@@ -272,7 +272,7 @@ async def handle_nl_message(message: discord.Message) -> None:
         return
     proposal = await message.reply(
         f"{reply}\n**You asked:** {plan.get('straight_goal', '')}\n"
-        f"**My evil plan ({len(actions)}/{MAX_ACTIONS} max):** {describe_actions(actions)}\n"
+        f"**Planned steps ({len(actions)}/{MAX_ACTIONS} max):** {describe_actions(actions)}\n"
         f"React ✅ to unleash, ❌ to spare your PC (60s, you only)."
     )
     pending[proposal.id] = {"actions": actions, "query": message.content,
@@ -322,7 +322,7 @@ async def on_message(message: discord.Message) -> None:
     if message.author == bot.user:
         return
     if message.content.startswith("!"):
-        # Explicit fixed commands bypass the LLM gremlin.
+        # Explicit fixed commands bypass the LLM planner.
         handle_message(message.content, str(message.author), str(message.channel))
         await bot.process_commands(message)
         return

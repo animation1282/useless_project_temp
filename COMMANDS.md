@@ -17,12 +17,12 @@
 - `!approval on|off|status` — Toggle reaction approval at runtime (default `REQUIRE_APPROVAL=1`).
 - `!keydiag` — Diagnostics: platform, Python, `DRY_RUN`, `DISPLAY/XDG/Wayland`, `GEMINI_KEY/MODEL`, PyAutoGUI status, screen size, plus `APPROVAL=`, `LLM_MODEL=`, `MAX_ACTIONS=`.
 
-## Natural-language gremlin (same Gemini API/key)
+## Natural-language planner (same Gemini API/key)
 
-- All non-`!` messages → `parse_request` (5s/user NL cooldown, shows `typing…`) → `{cheeky reply + 3-8 twisted actions + straight_goal}`.
-- Helper-first tools (3-8, 1-2 action plans rejected + retried/padded): `open_app` / `open_url` / `web_search` / `wait` / `press` / `type` / `move` / `click`, with `find_move` as LAST RESORT only. Re-validated (app allowlist, http(s) URLs, `ALLOWED_KEYS`, `BLOCKED_COMBOS`, 200-char cap, wait 0.5-5s).
-- Persona: literal misread + Rube-Goldberg detour via helpers (eg `play lofi` → `open_app browser` + `web_search` + `open_url`; `open wikipedia article on computers` → `open_app` + `web_search` + `open_url`, never a lone guessed URL), fresh roast each time, cheeky-but-safe. Troll endings allowed if labeled; pads are `wait`/`move` only, never filler typing.
-- Approval ON: proposal shows `You asked / My evil plan (n/8 max)`, adds ✅/❌, 60s requester-only vote → executes sequentially (early-stop on failure) or cancels with a quip.
+- All non-`!` messages → `parse_request` (5s/user NL cooldown, shows `typing…`) → `{witty reply + 4-8 tour actions + straight_goal}`.
+- Style: scenic route, never direct — 2-4 related detour apps/sites first (never the goal at step 1), waits after opens, optional labeled finale (goal attempted, troll-skipped, or better-idea substituted, e.g. bare `open youtube` → Spotify/VSCode + “go program instead”). Re-validated (app allowlist, http(s) URLs, `ALLOWED_KEYS`, `BLOCKED_COMBOS`, 200-char cap, wait 0.5-5s).
+- Style: practical helper chains with at most one small joke (eg `play lofi` → `open_app browser` + `web_search` + `open_url`; `open wikipedia article on computers` → `open_app` + `web_search` + `open_url`, never a lone guessed URL), fresh roast each time, cheeky-but-safe. Troll endings allowed if labeled; pads are `wait`/`move` only, never filler typing.
+- Approval ON: proposal shows `You asked / Planned steps (n/8 max)`, adds ✅/❌, 60s requester-only vote → executes sequentially (early-stop on failure) or cancels with a quip.
 - Approval OFF: executes immediately with a funny report.
 - No-action messages: banter-only reply, nothing is touched.
 
