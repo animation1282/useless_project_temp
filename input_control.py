@@ -1,28 +1,37 @@
 """Host input control — reusable outside Discord (CLI, other bots, scripts).
 
 Usage:
-    from input_control import do_press, do_type, key_diag
+    from input_control import do_press, do_type, do_move, do_click, take_screenshot
 
     do_press("win")
     do_press("ctrl+c")
     do_type("hello world")
+    take_screenshot()  # saves to shots/
+    do_move(500, 300)
+    do_click("left")
     print(key_diag())
 
 CLI:
     python input_control.py --press "ctrl+c"
     python input_control.py --type "hello world"
+    python input_control.py --move 500 300
+    python input_control.py --click left
+    python input_control.py --shot
     python input_control.py --diag
 """
 
 import argparse
+import datetime
 import os
 import platform
+import re
 import sys
 import time
 import traceback
 
 MAX_TYPE_LEN = 200
 TYPE_INTERVAL = 0.02
+SHOTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
 
 SYNONYMS = {
     "control": "ctrl",
@@ -142,16 +151,112 @@ def key_diag() -> str:
         f"DISPLAY={os.getenv('DISPLAY', '<empty>')} "
         f"XDG_SESSION_TYPE={os.getenv('XDG_SESSION_TYPE', '<empty>')} "
         f"WAYLAND_DISPLAY={os.getenv('WAYLAND_DISPLAY', '<empty>')}",
+        f"GEMINI_KEY={'present' if os.getenv('GEMINI_API_KEY') else 'missing'} "
+        f"GEMINI_MODEL={os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')}",
     ]
     try:
         gui = _get_pyautogui()
         names = getattr(gui, "KEY_NAMES", [])
         lines.append(f"pyautogui={getattr(gui, '__version__', 'installed')} PAUSE={gui.PAUSE}")
         lines.append(f"winleft_supported={'winleft' in names} win_supported={'win' in names}")
+        try:
+            lines.append(f"screen={gui.size()}")
+        except Exception as e:
+            lines.append(f"screen_unknown={e}")
     except Exception as e:  # e.g. KeyError: DISPLAY headless
         lines.append(f"pyautogui_import_failed={e}")
         lines.append("hint: Linux needs X11 + DISPLAY set + apt install scrot python3-tk")
     return "\n".join(lines)
+
+
+def slugify(text: str, max_len: int = 30) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
+    return (slug or "target")[:max_len]
+
+
+def shot_path(query: str = "manual") -> str:
+    os.makedirs(SHOTS_DIR, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join(SHOTS_DIR, f"shot_{stamp}_{slugify(query)}.png")
+
+
+def take_screenshot(path: str | None = None) -> str:
+    """Saves screenshot to shots/ (never sends anywhere). Returns path or 'error:...'."""
+    if path is None:
+        path = shot_path("manual")
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    print(f"[SHOT] -> {path} on {sys.platform}")
+    if is_dry_run():
+        try:
+            from PIL import Image
+
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            Image.new("RGB", (800, 600), color=(40, 40, 40)).save(path)
+            print(f"[DRY_RUN] dummy screenshot: {path}")
+            return path
+        except Exception as e:
+            return f"error:{e}"
+    try:
+        gui = _get_pyautogui()
+        gui.screenshot(path)
+    except Exception as e:
+        print(traceback.format_exc())
+        return f"error:{e}"
+    return path
+
+
+def screen_size() -> tuple[int, int]:
+    if is_dry_run():
+        return (800, 600)
+    gui = _get_pyautogui()
+    size = gui.size()
+    return (int(size.width), int(size.height))
+
+
+def do_move(x: int, y: int) -> str:
+    """Returns 'ok' | 'out_of_bounds' | 'error:...'. DRY_RUN only prints."""
+    try:
+        x, y = int(x), int(y)
+    except (TypeError, ValueError):
+        return "error:coordinates must be integers"
+    print(f"[MOVE] ({x}, {y}) on {sys.platform}")
+    if is_dry_run():
+        print(f"[DRY_RUN] would move to: ({x}, {y})")
+        return "ok"
+    try:
+        w, h = screen_size()
+        if not (0 <= x < w and 0 <= y < h):
+            return "out_of_bounds"
+        gui = _get_pyautogui()
+        gui.moveTo(x, y, duration=0.2)
+    except Exception as e:
+        print(traceback.format_exc())
+        return f"error:{e}"
+    return "ok"
+
+
+def do_click(button: str = "left", clicks: int = 1) -> str:
+    """Returns 'ok' | 'unknown_button' | 'error:...'. DRY_RUN only prints."""
+    button = (button or "left").strip().lower()
+    if button not in {"left", "right", "middle"}:
+        return "unknown_button"
+    try:
+        clicks = int(clicks)
+    except (TypeError, ValueError):
+        clicks = 1
+    clicks = 2 if clicks >= 2 else 1
+    print(f"[CLICK] {button} x{clicks} on {sys.platform}")
+    if is_dry_run():
+        print(f"[DRY_RUN] would click: {button} x{clicks}")
+        return "ok"
+    try:
+        gui = _get_pyautogui()
+        gui.click(button=button, clicks=clicks, interval=0.1)
+    except Exception as e:
+        print(traceback.format_exc())
+        return f"error:{e}"
+    return "ok"
 
 
 def main() -> None:
@@ -159,14 +264,29 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--press", help='e.g. "enter", "ctrl+c", "win"')
     group.add_argument("--type", dest="type_text", help='e.g. "hello world"')
+    group.add_argument("--move", nargs=2, type=int, metavar=("X", "Y"), help="move cursor to X Y")
+    group.add_argument("--click", nargs="?", const="left", help="left|right|middle")
+    group.add_argument("--double-click", dest="double_click", nargs="?", const="left",
+                       help="double click left|right|middle")
+    group.add_argument("--shot", action="store_true", help="save screenshot to shots/")
     group.add_argument("--diag", action="store_true", help="print diagnostics")
     args = parser.parse_args()
     if args.diag:
         print(key_diag())
     elif args.press is not None:
         print(do_press(args.press))
-    else:
+    elif args.type_text is not None:
         print(do_type(args.type_text))
+    elif args.move is not None:
+        print(do_move(args.move[0], args.move[1]))
+    elif args.double_click is not None:
+        print(do_click(args.double_click, clicks=2))
+    elif args.click is not None:
+        print(do_click(args.click, clicks=1))
+    elif args.shot:
+        print(take_screenshot())
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
