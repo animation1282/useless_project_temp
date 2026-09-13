@@ -4,73 +4,15 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from input_control import MAX_TYPE_LEN, do_press, do_type, key_diag
+
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-DRY_RUN = os.getenv("DRY_RUN") == "1"
 
 intents = discord.Intents.default()
 intents.message_content = True  # Required to read message.content
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-# --- PyAutoGUI key-press support (lazy import so DRY_RUN/headless still works) ---
-SYNONYMS = {"control": "ctrl", "escape": "esc", "del": "delete", "return": "enter"}
-
-ALLOWED_KEYS = {
-    "enter", "tab", "space", "esc", "backspace", "delete",
-    "up", "down", "left", "right",
-    "a", "b", "c", "v", "x", "z", "s", "t", "w", "f",
-    "ctrl", "alt", "shift", "win", "f4", "l", "d",
-}
-
-# Dangerous combos blocked even though access is open.
-BLOCKED_COMBOS = {
-    ("alt", "f4"),
-    ("ctrl", "alt", "delete"),
-    ("win", "l"),
-    ("win", "d"),
-    ("alt", "tab"),
-}
-
-_pyautogui = None
-
-
-def _get_pyautogui():
-    global _pyautogui
-    if _pyautogui is None:
-        import pyautogui
-
-        pyautogui.FAILSAFE = False
-        pyautogui.PAUSE = 0.1
-        _pyautogui = pyautogui
-    return _pyautogui
-
-
-def parse_combo(raw: str) -> list[str]:
-    parts = [SYNONYMS.get(p.strip().lower(), p.strip().lower()) for p in raw.split("+")]
-    return [p for p in parts if p]
-
-
-def do_press(raw: str) -> str:
-    """Returns 'ok' | 'unknown' | 'blocked'. DRY_RUN only prints."""
-    parts = parse_combo(raw)
-    if not parts or any(p not in ALLOWED_KEYS for p in parts):
-        return "unknown"
-    if tuple(parts) in BLOCKED_COMBOS or tuple(sorted(parts)) in BLOCKED_COMBOS:
-        return "blocked"
-    if len(parts) == 1 and parts[0] in {"win", "l", "d", "f4"}:
-        # Avoid lone sensitive keys; use them only inside combos check above.
-        if parts[0] in {"win", "l", "d"}:
-            return "unknown"
-    if DRY_RUN:
-        print(f"[DRY_RUN] would press: {'+'.join(parts)}")
-        return "ok"
-    gui = _get_pyautogui()
-    if len(parts) > 1:
-        gui.hotkey(*parts)
-    else:
-        gui.press(parts[0])
-    return "ok"
 
 
 def handle_message(content: str, author: str, channel: str) -> None:
@@ -98,8 +40,33 @@ async def key_cmd(ctx: commands.Context, *, keys: str) -> None:
         await ctx.send(f"Pressed {keys}")
     elif result == "blocked":
         await ctx.send("Blocked dangerous combo.")
+    elif result.startswith("error:"):
+        await ctx.send(f"Press failed: {result[6:]}")
     else:
-        await ctx.send("Unknown key. Eg: `!key enter`, `!key ctrl+c`")
+        await ctx.send("Unknown key. Eg: `!key enter`, `!key ctrl+c`, `!key win`")
+
+
+@bot.command(name="type")
+@commands.cooldown(1, 5.0, commands.BucketType.user)
+async def type_cmd(ctx: commands.Context, *, text: str) -> None:
+    handle_message(ctx.message.content, str(ctx.author), str(ctx.channel))
+    result = do_type(text)
+    if result == "ok":
+        await ctx.send("Typed ✅")
+    elif result == "too_long":
+        await ctx.send(f"Too long — max {MAX_TYPE_LEN} chars.")
+    elif result == "empty":
+        await ctx.send("Nothing to type.")
+    elif result.startswith("error:"):
+        await ctx.send(f"Type failed: {result[6:]}")
+    else:
+        await ctx.send("Type failed.")
+
+
+@bot.command(name="keydiag")
+async def keydiag_cmd(ctx: commands.Context) -> None:
+    handle_message(ctx.message.content, str(ctx.author), str(ctx.channel))
+    await ctx.send(f"```\n{key_diag()}\n```")
 
 
 @bot.event
@@ -107,7 +74,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
     if isinstance(error, commands.CommandOnCooldown):
         await ctx.send(f"Slow down — try again in {error.retry_after:.1f}s.")
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("Usage: `!key <key>` Eg: `!key enter`, `!key ctrl+c`")
+        await ctx.send("Usage: `!key <key>` Eg: `!key enter` or `!type <text>`")
     else:
         raise error
 
